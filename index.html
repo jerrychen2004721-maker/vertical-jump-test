@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>垂直跳高度測量 (倒數與紀錄版)</title>
+  <title>垂直跳動作分析與測量系統</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -19,7 +19,7 @@
       flex-direction: column;
       align-items: center;
     }
-    h2 { margin-top: 20px; }
+    h2 { margin-top: 20px; margin-bottom: 5px; }
     
     .container {
       position: relative;
@@ -41,7 +41,6 @@
       transform: scaleX(-1);
     }
     
-    /* 畫面中央的倒數計時大字 */
     #countdown_overlay {
       position: absolute;
       top: 50%;
@@ -67,91 +66,94 @@
       box-sizing: border-box;
     }
     
-    /* 歷史紀錄專用版面 */
+    .phase-panel {
+      width: 640px;
+      background: #2a2a2a;
+      padding: 10px 15px;
+      margin-top: 10px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-around;
+      box-sizing: border-box;
+      font-size: 18px;
+    }
+    .phase-active { color: #ff9100; font-weight: bold; }
+
     .history-panel {
       flex-direction: column;
       align-items: flex-start;
-      margin-top: 10px;
     }
-    .history-panel h3 {
-      margin: 0 0 10px 0;
-      color: #00b0ff;
-    }
+    .history-panel h3 { margin: 0 0 10px 0; color: #00b0ff; }
+    
     #history_list {
       list-style: none;
-      padding: 0;
-      margin: 0;
-      width: 100%;
-      max-height: 200px;
-      overflow-y: auto;
+      padding: 0; margin: 0; width: 100%;
     }
     #history_list li {
       background: #2a2a2a;
-      margin-bottom: 5px;
-      padding: 10px;
+      margin-bottom: 8px;
+      padding: 12px;
       border-radius: 5px;
       display: flex;
-      justify-content: space-between;
+      flex-direction: column;
       border-left: 4px solid #00e676;
     }
-
-    .data-box { text-align: center; }
-    .data-value {
-      font-size: 24px;
-      font-weight: bold;
-      color: #00e676;
+    .record-header {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 18px; margin-bottom: 5px;
     }
+    .record-details {
+      font-size: 14px; color: #aaa;
+    }
+    
+    .data-box { text-align: center; }
+    .data-value { font-size: 24px; font-weight: bold; color: #00e676; }
     .history-value { color: #00e676; font-weight: bold; }
     
     button {
-      background-color: #2979ff;
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      font-size: 16px;
-      border-radius: 5px;
-      cursor: pointer;
-      transition: 0.2s;
+      background-color: #2979ff; color: white; border: none;
+      padding: 12px 24px; font-size: 16px; border-radius: 5px;
+      cursor: pointer; transition: 0.2s;
     }
     button:disabled { background-color: #555; cursor: not-allowed; }
     .btn-ready { background-color: #ff3d00; font-weight: bold; }
     .btn-ready:hover { background-color: #dd3600; }
     
-    .status { font-weight: bold; color: #ff9100; }
+    /* LINE 分享按鈕樣式 */
+    .btn-line {
+      background-color: #06C755; color: white;
+      padding: 6px 12px; font-size: 14px; border-radius: 4px;
+      text-decoration: none; display: inline-block; font-weight: bold;
+      margin-top: 8px; align-self: flex-start;
+    }
+    .btn-line:hover { background-color: #05a546; }
+
   </style>
 </head>
 <body>
 
-  <h2>垂直跳高度即時測量系統</h2>
+  <h2>垂直跳動作分析與測量系統</h2>
   
   <div class="container">
     <video id="input_video" width="640" height="480" autoplay playsinline></video>
     <canvas id="output_canvas" width="640" height="480"></canvas>
-    <!-- 倒數計時顯示區塊 -->
     <div id="countdown_overlay">3</div>
   </div>
 
+  <div class="phase-panel">
+    <div>當前關節角度: <span id="knee_angle" style="color:#00b0ff;">180°</span></div>
+    <div>動作階段: <span id="action_phase" class="phase-active">待機</span></div>
+  </div>
+
   <div class="panel">
-    <div>
-      狀態: <br><span id="status_text" class="status">請按下開始測量</span>
-    </div>
-    <div class="data-box">
-      本次滯空<br>
-      <span id="flight_time" class="data-value">0.000</span> 秒
-    </div>
-    <div class="data-box">
-      本次高度<br>
-      <span id="jump_height" class="data-value">0.0</span> cm
-    </div>
+    <div class="data-box">本次滯空<br><span id="flight_time" class="data-value">0.000</span> 秒</div>
+    <div class="data-box">預估高度<br><span id="jump_height" class="data-value">0.0</span> cm</div>
     <button id="start_btn" class="btn-ready">開始測量</button>
   </div>
 
-  <!-- 新增：歷史紀錄版面 -->
   <div class="panel history-panel">
-    <h3>測量紀錄</h3>
-    <ul id="history_list">
-      <!-- 紀錄會自動安插在這裡 -->
-    </ul>
+    <h3>詳細測量紀錄</h3>
+    <ul id="history_list"></ul>
   </div>
 
   <script>
@@ -159,49 +161,86 @@
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
     
-    const statusText = document.getElementById('status_text');
     const flightTimeText = document.getElementById('flight_time');
     const jumpHeightText = document.getElementById('jump_height');
     const startBtn = document.getElementById('start_btn');
     const countdownOverlay = document.getElementById('countdown_overlay');
     const historyList = document.getElementById('history_list');
+    const kneeAngleText = document.getElementById('knee_angle');
+    const actionPhaseText = document.getElementById('action_phase');
 
+    // 系統變數
     let groundBaselineY = null;
     let jumpThreshold = 0.03;
     let currentState = 'IDLE'; 
     let takeoffTime = 0;
-    let jumpCount = 0; // 紀錄跳躍次數
+    let jumpCount = 0;
     const GRAVITY = 9.81;
 
-    // 按下開始按鈕：啟動 3 秒倒數
+    // 動作階段分析變數
+    let jumpPhase = '站立'; // 站立 -> 制動 -> 推蹬 -> 滯空
+    let minKneeAngle = 180;
+    let brakingStartTime = 0;
+    let propulsionStartTime = 0;
+
+    // 角度計算函式：依據三點座標算出夾角
+    function calculateAngle(a, b, c) {
+      const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+      let angle = Math.abs((radians * 180.0) / Math.PI);
+      if (angle > 180.0) angle = 360.0 - angle;
+      return angle;
+    }
+
+    // 繪製身體骨架 (排除 0~10 的臉部節點)
+    function drawBodyOnly(ctx, landmarks) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#00FF00';
+      // 繪製連線
+      for (const connection of POSE_CONNECTIONS) {
+        if (connection[0] > 10 && connection[1] > 10) {
+          const start = landmarks[connection[0]];
+          const end = landmarks[connection[1]];
+          ctx.beginPath();
+          ctx.moveTo(start.x * canvasElement.width, start.y * canvasElement.height);
+          ctx.lineTo(end.x * canvasElement.width, end.y * canvasElement.height);
+          ctx.stroke();
+        }
+      }
+      // 繪製節點
+      ctx.fillStyle = '#FF0000';
+      for (let i = 11; i < landmarks.length; i++) {
+        const lm = landmarks[i];
+        ctx.beginPath();
+        ctx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 4, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+
     startBtn.addEventListener('click', () => {
       if (currentState !== 'IDLE') return;
-      
       currentState = 'COUNTDOWN';
       startBtn.disabled = true; 
       startBtn.innerText = '準備中...';
       startBtn.classList.remove('btn-ready');
       
-      statusText.innerText = '請在原地準備起跳';
-      statusText.style.color = '#ff9100';
-      
       let count = 3;
       countdownOverlay.innerText = count;
       countdownOverlay.style.display = 'block';
 
-      // 倒數計時器
       const timer = setInterval(() => {
         count--;
         if (count > 0) {
           countdownOverlay.innerText = count;
         } else {
           clearInterval(timer);
-          countdownOverlay.style.display = 'none'; // 隱藏倒數
+          countdownOverlay.style.display = 'none';
           
-          // 倒數結束，切換為抓取基準線狀態
           groundBaselineY = null;
           currentState = 'CALIBRATING';
           startBtn.innerText = '偵測中...';
+          jumpPhase = '站立';
+          minKneeAngle = 180;
+          actionPhaseText.innerText = '站立準備';
         }
       }, 1000);
     });
@@ -223,12 +262,19 @@
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
       
       if (results.poseLandmarks) {
-        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
-        drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
+        // 使用客製化繪圖函式 (不畫臉)
+        drawBodyOnly(canvasCtx, results.poseLandmarks);
 
         const leftAnkleY = results.poseLandmarks[27].y;
         const rightAnkleY = results.poseLandmarks[28].y;
         const currentFootY = Math.max(leftAnkleY, rightAnkleY);
+
+        // 計算左右腳膝蓋角度並取平均 (髖-膝-踝)
+        const leftAngle = calculateAngle(results.poseLandmarks[23], results.poseLandmarks[25], results.poseLandmarks[27]);
+        const rightAngle = calculateAngle(results.poseLandmarks[24], results.poseLandmarks[26], results.poseLandmarks[28]);
+        const avgKneeAngle = (leftAngle + rightAngle) / 2;
+        
+        kneeAngleText.innerText = avgKneeAngle.toFixed(0) + '°';
 
         if (currentState === 'IDLE' || currentState === 'COUNTDOWN') {
           canvasCtx.restore();
@@ -238,8 +284,7 @@
         if (currentState === 'CALIBRATING') {
           groundBaselineY = currentFootY;
           currentState = 'GROUNDED';
-          statusText.innerText = '請起跳！';
-          statusText.style.color = '#00e676';
+          jumpPhase = '站立';
         } 
         else if (currentState === 'GROUNDED' || currentState === 'AIRBORNE') {
           
@@ -254,38 +299,62 @@
 
           const isAirborne = currentFootY < (groundBaselineY - jumpThreshold);
 
+          // === 動作階段分析 (制動與推蹬) ===
+          if (currentState === 'GROUNDED') {
+             // 紀錄最低屈膝角度
+             if (avgKneeAngle < minKneeAngle) { minKneeAngle = avgKneeAngle; }
+
+             if (jumpPhase === '站立' && avgKneeAngle < 165) {
+               jumpPhase = '制動 (Braking)';
+               brakingStartTime = performance.now();
+               actionPhaseText.innerText = jumpPhase;
+             } 
+             else if (jumpPhase === '制動 (Braking)' && avgKneeAngle > minKneeAngle + 5) {
+               // 當角度從最低點開始回升超過 5 度，視為開始往上發力推蹬
+               jumpPhase = '推蹬 (Propulsion)';
+               propulsionStartTime = performance.now();
+               actionPhaseText.innerText = jumpPhase;
+             }
+          }
+
+          // === 滯空與著地判定 ===
           if (currentState === 'GROUNDED' && isAirborne) {
             currentState = 'AIRBORNE';
             takeoffTime = performance.now();
-            statusText.innerText = '跳躍中...';
-            statusText.style.color = '#ff1744';
+            jumpPhase = '滯空 (Flight)';
+            actionPhaseText.innerText = jumpPhase;
           } 
           else if (currentState === 'AIRBORNE' && !isAirborne) {
             const landingTime = performance.now();
             const flightTimeSec = (landingTime - takeoffTime) / 1000;
             
-            // 排除過短的雜訊 (小於 0.15 秒)
             if (flightTimeSec > 0.15) {
               const heightCm = (1 / 8) * GRAVITY * Math.pow(flightTimeSec, 2) * 100;
               
-              // 1. 更新主畫面數據
               flightTimeText.innerText = flightTimeSec.toFixed(3);
               jumpHeightText.innerText = heightCm.toFixed(1);
               
-              // 2. 寫入歷史紀錄面版
+              // 生成 LINE 分享連結
+              const shareText = `【我的垂直跳測試數據】\n🚀 跳躍高度：${heightCm.toFixed(1)} cm\n⏱️ 滯空時間：${flightTimeSec.toFixed(3)} 秒\n🦵 最低屈膝角：${minKneeAngle.toFixed(0)} 度\n快來測測看你的爆發力！`;
+              const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(shareText)}`;
+
               jumpCount++;
               const li = document.createElement('li');
-              li.innerHTML = `<span>第 ${jumpCount} 跳</span> <span>滯空 <span class="history-value">${flightTimeSec.toFixed(3)}</span> 秒 / 高度 <span class="history-value">${heightCm.toFixed(1)}</span> cm</span>`;
-              // 將最新紀錄安插在清單的最上面
+              li.innerHTML = `
+                <div class="record-header">
+                  <span>第 ${jumpCount} 跳</span> 
+                  <span>高度: <span class="history-value">${heightCm.toFixed(1)}</span> cm</span>
+                </div>
+                <div class="record-details">
+                  滯空時間: ${flightTimeSec.toFixed(3)}s | 制動最低角度: ${minKneeAngle.toFixed(0)}°
+                </div>
+                <a href="${lineUrl}" target="_blank" class="btn-line">分享到 LINE</a>
+              `;
               historyList.insertBefore(li, historyList.firstChild);
             }
             
-            // 3. 測量完成，自動停止並回到待機狀態
             currentState = 'IDLE';
-            statusText.innerText = '測量完成！請重新按下開始';
-            statusText.style.color = '#00b0ff';
-            
-            // 恢復按鈕狀態，允許下一次測量
+            actionPhaseText.innerText = '測量完成';
             startBtn.innerText = '開始下一次測量';
             startBtn.disabled = false;
             startBtn.classList.add('btn-ready');
@@ -296,12 +365,8 @@
     });
 
     const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        await pose.send({image: videoElement});
-      },
-      width: 640,
-      height: 480,
-      frameRate: { ideal: 60, max: 120 } 
+      onFrame: async () => { await pose.send({image: videoElement}); },
+      width: 640, height: 480, frameRate: { ideal: 60, max: 120 } 
     });
     camera.start();
   </script>
