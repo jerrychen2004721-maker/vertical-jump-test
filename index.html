@@ -2,8 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>垂直跳高度測量 (手動開始版)</title>
-  <!-- 引入 MediaPipe 所需庫 -->
+  <title>垂直跳高度測量 (倒數與紀錄版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,11 +14,13 @@
       background-color: #121212;
       color: #ffffff;
       margin: 0;
+      padding-bottom: 30px;
       display: flex;
       flex-direction: column;
       align-items: center;
     }
     h2 { margin-top: 20px; }
+    
     .container {
       position: relative;
       width: 640px;
@@ -39,6 +40,21 @@
       height: 100%;
       transform: scaleX(-1);
     }
+    
+    /* 畫面中央的倒數計時大字 */
+    #countdown_overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 150px;
+      font-weight: bold;
+      color: white;
+      text-shadow: 0px 0px 20px #ff3d00;
+      display: none;
+      z-index: 10;
+    }
+
     .panel {
       width: 640px;
       background: #1e1e1e;
@@ -50,33 +66,58 @@
       align-items: center;
       box-sizing: border-box;
     }
-    .data-box {
-      text-align: center;
+    
+    /* 歷史紀錄專用版面 */
+    .history-panel {
+      flex-direction: column;
+      align-items: flex-start;
+      margin-top: 10px;
     }
+    .history-panel h3 {
+      margin: 0 0 10px 0;
+      color: #00b0ff;
+    }
+    #history_list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      width: 100%;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #history_list li {
+      background: #2a2a2a;
+      margin-bottom: 5px;
+      padding: 10px;
+      border-radius: 5px;
+      display: flex;
+      justify-content: space-between;
+      border-left: 4px solid #00e676;
+    }
+
+    .data-box { text-align: center; }
     .data-value {
       font-size: 24px;
       font-weight: bold;
       color: #00e676;
     }
+    .history-value { color: #00e676; font-weight: bold; }
+    
     button {
       background-color: #2979ff;
       color: white;
       border: none;
-      padding: 10px 20px;
+      padding: 12px 24px;
       font-size: 16px;
       border-radius: 5px;
       cursor: pointer;
       transition: 0.2s;
     }
-    button:hover { background-color: #2264d1; }
-    /* 開始按鈕在未點擊前給予醒目顏色 */
+    button:disabled { background-color: #555; cursor: not-allowed; }
     .btn-ready { background-color: #ff3d00; font-weight: bold; }
     .btn-ready:hover { background-color: #dd3600; }
     
-    .status {
-      font-weight: bold;
-      color: #ff9100;
-    }
+    .status { font-weight: bold; color: #ff9100; }
   </style>
 </head>
 <body>
@@ -86,22 +127,31 @@
   <div class="container">
     <video id="input_video" width="640" height="480" autoplay playsinline></video>
     <canvas id="output_canvas" width="640" height="480"></canvas>
+    <!-- 倒數計時顯示區塊 -->
+    <div id="countdown_overlay">3</div>
   </div>
 
   <div class="panel">
     <div>
-      狀態: <span id="status_text" class="status">請站到畫面中，按下開始</span>
+      狀態: <br><span id="status_text" class="status">請按下開始測量</span>
     </div>
     <div class="data-box">
-      滯空時間<br>
+      本次滯空<br>
       <span id="flight_time" class="data-value">0.000</span> 秒
     </div>
     <div class="data-box">
-      預估跳躍高度<br>
+      本次高度<br>
       <span id="jump_height" class="data-value">0.0</span> cm
     </div>
-    <!-- 將按鈕改為開始測量 -->
     <button id="start_btn" class="btn-ready">開始測量</button>
+  </div>
+
+  <!-- 新增：歷史紀錄版面 -->
+  <div class="panel history-panel">
+    <h3>測量紀錄</h3>
+    <ul id="history_list">
+      <!-- 紀錄會自動安插在這裡 -->
+    </ul>
   </div>
 
   <script>
@@ -113,26 +163,47 @@
     const flightTimeText = document.getElementById('flight_time');
     const jumpHeightText = document.getElementById('jump_height');
     const startBtn = document.getElementById('start_btn');
+    const countdownOverlay = document.getElementById('countdown_overlay');
+    const historyList = document.getElementById('history_list');
 
     let groundBaselineY = null;
     let jumpThreshold = 0.03;
-    
-    // 將初始狀態改為 IDLE (待機)，此時只顯示畫面不測量
     let currentState = 'IDLE'; 
     let takeoffTime = 0;
+    let jumpCount = 0; // 紀錄跳躍次數
     const GRAVITY = 9.81;
 
-    // 按下開始按鈕後，才進入校正與測量狀態
+    // 按下開始按鈕：啟動 3 秒倒數
     startBtn.addEventListener('click', () => {
-      groundBaselineY = null;
-      currentState = 'CALIBRATING';
+      if (currentState !== 'IDLE') return;
       
-      // 更改按鈕外觀與文字 (變成重新校正的功能)
-      startBtn.innerText = '重新校正';
+      currentState = 'COUNTDOWN';
+      startBtn.disabled = true; 
+      startBtn.innerText = '準備中...';
       startBtn.classList.remove('btn-ready');
       
-      statusText.innerText = '抓取地面基準線中...';
+      statusText.innerText = '請在原地準備起跳';
       statusText.style.color = '#ff9100';
+      
+      let count = 3;
+      countdownOverlay.innerText = count;
+      countdownOverlay.style.display = 'block';
+
+      // 倒數計時器
+      const timer = setInterval(() => {
+        count--;
+        if (count > 0) {
+          countdownOverlay.innerText = count;
+        } else {
+          clearInterval(timer);
+          countdownOverlay.style.display = 'none'; // 隱藏倒數
+          
+          // 倒數結束，切換為抓取基準線狀態
+          groundBaselineY = null;
+          currentState = 'CALIBRATING';
+          startBtn.innerText = '偵測中...';
+        }
+      }, 1000);
     });
 
     const pose = new Pose({
@@ -142,8 +213,6 @@
     pose.setOptions({
       modelComplexity: 1,
       smoothLandmarks: true,
-      enableSegmentation: false,
-      smoothSegmentation: false,
       minDetectionConfidence: 0.6,
       minTrackingConfidence: 0.6
     });
@@ -154,7 +223,6 @@
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
       
       if (results.poseLandmarks) {
-        // 無論在哪個狀態，都保持繪製骨架讓使用者知道鏡頭有抓到人
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
         drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
 
@@ -162,8 +230,7 @@
         const rightAnkleY = results.poseLandmarks[28].y;
         const currentFootY = Math.max(leftAnkleY, rightAnkleY);
 
-        // 如果還沒按下開始 (IDLE)，就提早結束這回合的邏輯，不進行跳躍判定
-        if (currentState === 'IDLE') {
+        if (currentState === 'IDLE' || currentState === 'COUNTDOWN') {
           canvasCtx.restore();
           return;
         }
@@ -171,7 +238,7 @@
         if (currentState === 'CALIBRATING') {
           groundBaselineY = currentFootY;
           currentState = 'GROUNDED';
-          statusText.innerText = '偵測中，請起跳！';
+          statusText.innerText = '請起跳！';
           statusText.style.color = '#00e676';
         } 
         else if (currentState === 'GROUNDED' || currentState === 'AIRBORNE') {
@@ -197,15 +264,31 @@
             const landingTime = performance.now();
             const flightTimeSec = (landingTime - takeoffTime) / 1000;
             
+            // 排除過短的雜訊 (小於 0.15 秒)
             if (flightTimeSec > 0.15) {
               const heightCm = (1 / 8) * GRAVITY * Math.pow(flightTimeSec, 2) * 100;
+              
+              // 1. 更新主畫面數據
               flightTimeText.innerText = flightTimeSec.toFixed(3);
               jumpHeightText.innerText = heightCm.toFixed(1);
+              
+              // 2. 寫入歷史紀錄面版
+              jumpCount++;
+              const li = document.createElement('li');
+              li.innerHTML = `<span>第 ${jumpCount} 跳</span> <span>滯空 <span class="history-value">${flightTimeSec.toFixed(3)}</span> 秒 / 高度 <span class="history-value">${heightCm.toFixed(1)}</span> cm</span>`;
+              // 將最新紀錄安插在清單的最上面
+              historyList.insertBefore(li, historyList.firstChild);
             }
             
-            currentState = 'GROUNDED';
-            statusText.innerText = '偵測中，請起跳！';
-            statusText.style.color = '#00e676';
+            // 3. 測量完成，自動停止並回到待機狀態
+            currentState = 'IDLE';
+            statusText.innerText = '測量完成！請重新按下開始';
+            statusText.style.color = '#00b0ff';
+            
+            // 恢復按鈕狀態，允許下一次測量
+            startBtn.innerText = '開始下一次測量';
+            startBtn.disabled = false;
+            startBtn.classList.add('btn-ready');
           }
         }
       }
