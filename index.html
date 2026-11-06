@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>垂直跳動作分析 (解剖學角度專業版)</title>
+  <title>垂直跳分析 (防作弊雙重驗證版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
@@ -21,14 +21,11 @@
       max-width: 95vw; max-height: 70vw;
     }
     
-    .hidden-video {
-      position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
-    }
+    .hidden-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     
     canvas {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      object-fit: cover;
-      transform: scaleX(-1);
+      object-fit: cover; transform: scaleX(-1);
     }
     
     #countdown_overlay {
@@ -39,8 +36,7 @@
 
     .panel {
       width: 640px; max-width: 95vw; background: #1e1e1e; padding: 15px; margin-top: 15px;
-      border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box;
-      flex-wrap: wrap; gap: 10px;
+      border-radius: 8px; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;
     }
     
     .phase-panel {
@@ -49,15 +45,15 @@
     }
     .phase-active { color: #ff9100; font-weight: bold; font-size: 18px; }
 
-    .history-panel { flex-direction: column; align-items: flex-start; }
-    .history-panel h3 { margin: 0 0 10px 0; color: #00b0ff; }
+    .history-panel { align-items: flex-start; }
+    .history-panel h3 { margin: 0 0 10px 0; color: #00b0ff; width: 100%;}
     
     #history_list { list-style: none; padding: 0; margin: 0; width: 100%; max-height: 350px; overflow-y: auto;}
     #history_list li {
       background: #2a2a2a; margin-bottom: 8px; padding: 12px; border-radius: 5px;
       display: flex; flex-direction: column; border-left: 4px solid #00e676;
     }
-    .record-header { display: flex; justify-content: space-between; align-items: center; font-size: 18px; margin-bottom: 5px; }
+    .record-header { display: flex; justify-content: space-between; align-items: center; font-size: 18px; margin-bottom: 5px; flex-wrap: wrap; gap: 5px;}
     .record-details { font-size: 14px; color: #aaa; line-height: 1.6;}
     
     .data-box { text-align: center; flex: 1; min-width: 100px;}
@@ -85,11 +81,20 @@
       background-color: #06C755; color: white; padding: 6px 12px; font-size: 14px; border-radius: 4px;
       text-decoration: none; display: inline-block; font-weight: bold; margin-top: 8px; align-self: flex-start;
     }
+    
+    .scale-box {
+      width: 100%; display: flex; justify-content: center; align-items: center; 
+      margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #444;
+      font-size: 15px;
+    }
+    .cheat-warning {
+      background: #ff1744; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px; font-weight: bold;
+    }
   </style>
 </head>
 <body>
 
-  <h2>垂直跳分析 (解剖學屈曲追蹤)</h2>
+  <h2>垂直跳分析 (防屈膝作弊驗證)</h2>
   
   <div class="container">
     <video id="webcam_video" class="hidden-video" playsinline autoplay></video>
@@ -104,10 +109,17 @@
   </div>
 
   <div class="panel">
+    <!-- 新增：身高輸入作為比例尺 -->
+    <div class="scale-box">
+      <span style="color: #ff9100; font-weight: bold; margin-right: 10px;">📏 比例尺校正</span>
+      受測者真實身高：<input type="number" id="user_height" value="170" style="width: 60px; margin: 0 5px; text-align: center; border-radius: 4px; border: none; padding: 4px; font-weight:bold;"> cm
+    </div>
+
     <div style="display:flex; width: 100%; justify-content: space-around; margin-bottom: 15px;">
       <div class="data-box">本次滯空<br><span id="flight_time" class="data-value">0.000</span> 秒</div>
       <div class="data-box">預估高度<br><span id="jump_height" class="data-value">0.0</span> cm</div>
     </div>
+    
     <div class="btn-group">
       <input type="file" id="file_input" accept="video/*" style="display: none;">
       <button id="flip_cam_btn" class="btn-flip">切換鏡頭</button>
@@ -134,6 +146,7 @@
     const flipCamBtn = document.getElementById('flip_cam_btn');
     const fileInput = document.getElementById('file_input');
     const countdownOverlay = document.getElementById('countdown_overlay');
+    const userHeightInput = document.getElementById('user_height');
     
     const hipAngleText = document.getElementById('hip_angle');
     const kneeAngleText = document.getElementById('knee_angle');
@@ -151,10 +164,14 @@
     let jumpCount = 0;
     const GRAVITY = 9.81;
 
+    // 比例尺與防作弊變數
+    let cmPerNormY = 0;       // 1單位正規化Y軸代表幾公分
+    let standingHipY = 0;     // 起跳前的髖關節高度
+    let peakHipY = 1;         // 空中達到的最高髖關節位置(Y越小越高)
+
     let tempFlightTime = 0;
     let tempJumpHeight = 0;
 
-    // 解剖學角度 (0度為直立，數字越大屈曲越深)
     let takeoffMaxHipFlexion = 0;
     let takeoffMaxKneeFlexion = 0;
     let landingMaxHipFlexion = 0;
@@ -165,27 +182,20 @@
     const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
     pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 
-    // 取得絕對夾角
     function calculateInnerAngle(a, b, c) {
       const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
       let angle = Math.abs((radians * 180.0) / Math.PI);
       return angle > 180.0 ? 360.0 - angle : angle;
     }
-
-    // 取得解剖學屈曲角度 (180 - 絕對夾角)
-    function getFlexionAngle(a, b, c) {
-      return 180.0 - calculateInnerAngle(a, b, c);
-    }
+    function getFlexionAngle(a, b, c) { return 180.0 - calculateInnerAngle(a, b, c); }
 
     function drawBodyOnly(ctx, landmarks) {
       ctx.lineWidth = 3; ctx.strokeStyle = '#00FF00';
       for (const connection of POSE_CONNECTIONS) {
         if (connection[0] > 10 && connection[1] > 10) {
           const start = landmarks[connection[0]]; const end = landmarks[connection[1]];
-          ctx.beginPath();
-          ctx.moveTo(start.x * canvasElement.width, start.y * canvasElement.height);
-          ctx.lineTo(end.x * canvasElement.width, end.y * canvasElement.height);
-          ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(start.x * canvasElement.width, start.y * canvasElement.height);
+          ctx.lineTo(end.x * canvasElement.width, end.y * canvasElement.height); ctx.stroke();
         }
       }
       ctx.fillStyle = '#FF0000';
@@ -203,9 +213,11 @@
       if (results.poseLandmarks) {
         drawBodyOnly(canvasCtx, results.poseLandmarks);
         const lms = results.poseLandmarks;
-        const currentFootY = Math.max(lms[27].y, lms[28].y);
         
-        // 即時解剖學屈曲角計算 (平均左右兩側)
+        // 使用腳尖與腳踝抓取最低點
+        const currentFootY = Math.max(lms[27].y, lms[28].y, lms[31].y, lms[32].y);
+        const currentHipY = (lms[23].y + lms[24].y) / 2;
+        
         const avgHipFlexion = (getFlexionAngle(lms[11], lms[23], lms[25]) + getFlexionAngle(lms[12], lms[24], lms[26])) / 2;
         const avgKneeFlexion = (getFlexionAngle(lms[23], lms[25], lms[27]) + getFlexionAngle(lms[24], lms[26], lms[28])) / 2;
         
@@ -215,10 +227,21 @@
         if (currentState === 'IDLE' || currentState === 'COUNTDOWN') { canvasCtx.restore(); return; }
 
         if (currentState === 'CALIBRATING') {
+          // 校正 1：建立地面基準線
           groundBaselineY = currentFootY; 
+          
+          // 校正 2：建立身高比例尺 (使用頭頂/鼻子(0)到腳底的距離)
+          const pixelHeight = currentFootY - lms[0].y;
+          const realHeightCm = parseFloat(userHeightInput.value) || 170;
+          cmPerNormY = realHeightCm / pixelHeight;
+          
+          // 校正 3：鎖定起跳前的髖關節基準高度
+          standingHipY = currentHipY;
+          peakHipY = currentHipY;
+          
           currentState = 'GROUNDED'; 
           jumpPhase = '站立';
-          actionPhaseText.innerText = '推蹬準備中 (捕捉起跳深蹲)...';
+          actionPhaseText.innerText = '推蹬準備中 (已校正比例尺)...';
         } 
         else if (currentState === 'GROUNDED' || currentState === 'AIRBORNE' || currentState === 'LANDING') {
           
@@ -232,50 +255,52 @@
 
           // 階段 1：地面推蹬期
           if (currentState === 'GROUNDED') {
-             // 追蹤最大屈曲角 (越深數字越大)
              if (avgHipFlexion > takeoffMaxHipFlexion) takeoffMaxHipFlexion = avgHipFlexion;
              if (avgKneeFlexion > takeoffMaxKneeFlexion) takeoffMaxKneeFlexion = avgKneeFlexion;
 
-             // 動作切分邏輯更新
              if (jumpPhase === '站立' && avgKneeFlexion > 15) { 
                jumpPhase = '制動 (Braking)'; 
              } else if (jumpPhase === '制動 (Braking)' && avgKneeFlexion < takeoffMaxKneeFlexion - 5) { 
-               // 角度從最大屈曲開始變小(回伸超過5度)，代表開始向上推蹬
                jumpPhase = '推蹬 (Propulsion)'; 
              }
 
              if (isAirborne) {
                 currentState = 'AIRBORNE';
                 takeoffTimestamp = isLiveMode ? (performance.now() / 1000) : uploadVideo.currentTime;
-                actionPhaseText.innerText = '滯空 (Flight)';
+                actionPhaseText.innerText = '滯空 (追蹤重心爬升)...';
                 landingMaxHipFlexion = 0; landingMaxKneeFlexion = 0;
+                peakHipY = currentHipY; // 離地瞬間重置最高點
              }
           }
           // 階段 2：滯空期
-          else if (currentState === 'AIRBORNE' && !isAirborne) {
-            const landingTimestamp = isLiveMode ? (performance.now() / 1000) : uploadVideo.currentTime;
-            const flightTimeSec = Math.max(0, landingTimestamp - takeoffTimestamp);
+          else if (currentState === 'AIRBORNE') {
+            // 在空中不斷更新髖部達到的最高位置 (Y越小代表越高)
+            if (currentHipY < peakHipY) { peakHipY = currentHipY; }
             
-            if (flightTimeSec > 0.15) {
-              tempFlightTime = flightTimeSec;
-              tempJumpHeight = (1 / 8) * GRAVITY * Math.pow(flightTimeSec, 2) * 100;
+            if (!isAirborne) {
+              const landingTimestamp = isLiveMode ? (performance.now() / 1000) : uploadVideo.currentTime;
+              const flightTimeSec = Math.max(0, landingTimestamp - takeoffTimestamp);
               
-              document.getElementById('flight_time').innerText = tempFlightTime.toFixed(3);
-              document.getElementById('jump_height').innerText = tempJumpHeight.toFixed(1);
-              
-              currentState = 'LANDING';
-              landingStartTimestamp = landingTimestamp;
-              actionPhaseText.innerText = '落地緩衝中 (捕捉著地深蹲)...';
-            } else {
-              currentState = 'IDLE'; 
-              actionPhaseText.innerText = '測量失敗 (滯空過短，請重試)';
-              startBtn.innerText = isLiveMode ? '重新測量' : '重新分析影片';
-              startBtn.disabled = false; startBtn.classList.add('btn-ready');
+              if (flightTimeSec > 0.15) {
+                tempFlightTime = flightTimeSec;
+                tempJumpHeight = (1 / 8) * GRAVITY * Math.pow(flightTimeSec, 2) * 100;
+                
+                document.getElementById('flight_time').innerText = tempFlightTime.toFixed(3);
+                document.getElementById('jump_height').innerText = tempJumpHeight.toFixed(1);
+                
+                currentState = 'LANDING';
+                landingStartTimestamp = landingTimestamp;
+                actionPhaseText.innerText = '落地緩衝中 (計算防作弊驗證)...';
+              } else {
+                currentState = 'IDLE'; 
+                actionPhaseText.innerText = '測量失敗 (滯空過短)';
+                startBtn.innerText = isLiveMode ? '重新測量' : '重新分析影片';
+                startBtn.disabled = false; startBtn.classList.add('btn-ready');
+              }
             }
           }
           // 階段 3：落地緩衝期
           else if (currentState === 'LANDING') {
-             // 追蹤落地最大屈曲角
              if (avgHipFlexion > landingMaxHipFlexion) landingMaxHipFlexion = avgHipFlexion;
              if (avgKneeFlexion > landingMaxKneeFlexion) landingMaxKneeFlexion = avgKneeFlexion;
 
@@ -283,13 +308,27 @@
              
              if (currentTimestamp - landingStartTimestamp > 1.0 || (!isLiveMode && uploadVideo.ended)) {
                 
-                const shareText = `【垂直跳屈曲角度分析】\n🚀 高度：${tempJumpHeight.toFixed(1)}cm\n⏱️ 滯空：${tempFlightTime.toFixed(3)}s\n📉 推蹬最大屈曲 ➔ 髖:${takeoffMaxHipFlexion.toFixed(0)}°/膝:${takeoffMaxKneeFlexion.toFixed(0)}°\n📉 落地最大屈曲 ➔ 髖:${landingMaxHipFlexion.toFixed(0)}°/膝:${landingMaxKneeFlexion.toFixed(0)}°`;
+                // === 雙重驗證：計算髖部位移的真實高度 ===
+                const hipDisplacementNorm = standingHipY - peakHipY;
+                const trueHipHeightCm = Math.max(0, hipDisplacementNorm * cmPerNormY);
+                
+                // 如果時間法高度大於重心爬升高度超過 12 公分，判定為屈膝作弊
+                const isTuckJump = (tempJumpHeight - trueHipHeightCm) > 12;
+                let warningTag = '';
+                if (isTuckJump) {
+                  warningTag = `<span class="cheat-warning">⚠️ 屈膝高估 (真實驗證: ${trueHipHeightCm.toFixed(1)} cm)</span>`;
+                }
+                
+                const shareText = `【垂直跳動力鏈分析】\n🚀 時間預估高度：${tempJumpHeight.toFixed(1)}cm\n📏 重心位移驗證：${trueHipHeightCm.toFixed(1)}cm\n⏱️ 滯空：${tempFlightTime.toFixed(3)}s\n📉 推蹬屈曲 ➔ 髖:${takeoffMaxHipFlexion.toFixed(0)}°/膝:${takeoffMaxKneeFlexion.toFixed(0)}°`;
                 
                 const li = document.createElement('li');
                 li.innerHTML = `
-                  <div class="record-header"><span>第 ${++jumpCount} 跳</span> <span style="color:#00e676; font-weight:bold;">${tempJumpHeight.toFixed(1)} cm</span></div>
+                  <div class="record-header">
+                    <span>第 ${++jumpCount} 跳</span> 
+                    <span style="color:#00e676; font-weight:bold;">${tempJumpHeight.toFixed(1)} cm ${warningTag}</span>
+                  </div>
                   <div class="record-details">
-                    滯空: ${tempFlightTime.toFixed(3)}s<br>
+                    滯空: ${tempFlightTime.toFixed(3)}s | 髖部位移: ${trueHipHeightCm.toFixed(1)}cm<br>
                     推蹬最大屈曲 ➔ 髖: <span class="history-value">${takeoffMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${takeoffMaxKneeFlexion.toFixed(0)}°</span><br>
                     落地最大屈曲 ➔ 髖: <span class="history-value">${landingMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${landingMaxKneeFlexion.toFixed(0)}°</span>
                   </div>
@@ -309,12 +348,9 @@
       canvasCtx.restore();
     });
 
-    // 啟動硬體相機
     async function startWebcam() {
       isLiveMode = true; camBtn.style.display = 'none'; flipCamBtn.style.display = 'block'; 
       canvasElement.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)';
-      const modeText = currentFacingMode === 'user' ? '前鏡頭' : '後鏡頭';
-      
       actionPhaseText.innerText = `相機啟動中...`; startBtn.disabled = true;
 
       if (currentStream) {
@@ -329,9 +365,8 @@
         webcamVideo.srcObject = currentStream;
         await webcamVideo.play();
         
-        actionPhaseText.innerText = `待機中 (${modeText})`; 
+        actionPhaseText.innerText = `待機中 (${currentFacingMode === 'user' ? '前' : '後'}鏡頭)`; 
         startBtn.innerText = '開始測量'; startBtn.disabled = false;
-        
         processWebcamFrame(); 
       } catch (err) {
         actionPhaseText.innerText = '無法啟動相機，請檢查權限';
@@ -340,11 +375,7 @@
     
     function processWebcamFrame() {
       if (!isLiveMode || webcamVideo.paused || webcamVideo.ended) return;
-      pose.send({image: webcamVideo}).then(() => {
-        requestAnimationFrame(processWebcamFrame);
-      }).catch(e => {
-        requestAnimationFrame(processWebcamFrame);
-      });
+      pose.send({image: webcamVideo}).then(() => requestAnimationFrame(processWebcamFrame)).catch(() => requestAnimationFrame(processWebcamFrame));
     }
 
     startWebcam();
@@ -363,10 +394,7 @@
       const file = e.target.files[0]; if (!file) return;
 
       isLiveMode = false;
-      if (currentStream) {
-        currentStream.getTracks().forEach(track => track.stop());
-        webcamVideo.srcObject = null;
-      }
+      if (currentStream) { currentStream.getTracks().forEach(track => track.stop()); webcamVideo.srcObject = null; }
       
       canvasElement.style.transform = 'scaleX(1)';
       camBtn.style.display = 'block'; flipCamBtn.style.display = 'none'; 
@@ -382,20 +410,15 @@
         try {
           await pose.send({image: uploadVideo});
           currentState = 'IDLE';
-          actionPhaseText.innerText = '影片已就緒 (起初請保持站立)';
-          startBtn.innerText = '分析影片跳躍';
-          startBtn.disabled = false;
+          actionPhaseText.innerText = '影片已就緒 (請確保受測者站直入鏡)';
+          startBtn.innerText = '分析影片跳躍'; startBtn.disabled = false;
         } catch(err) {}
       }, 500); 
     });
 
     function processUploadFrame() {
       if (isLiveMode || uploadVideo.paused || uploadVideo.ended) return;
-      pose.send({image: uploadVideo}).then(() => {
-        requestAnimationFrame(processUploadFrame);
-      }).catch(e => {
-        requestAnimationFrame(processUploadFrame);
-      });
+      pose.send({image: uploadVideo}).then(() => requestAnimationFrame(processUploadFrame)).catch(() => requestAnimationFrame(processUploadFrame));
     }
     uploadVideo.addEventListener('play', processUploadFrame);
 
@@ -410,8 +433,8 @@
           if (count > 0) { countdownOverlay.innerText = count; } 
           else {
             clearInterval(timer); countdownOverlay.style.display = 'none';
-            groundBaselineY = null; currentState = 'CALIBRATING'; startBtn.innerText = '偵測中...';
-            takeoffMaxHipFlexion = 0; takeoffMaxKneeFlexion = 0; actionPhaseText.innerText = '站立準備';
+            groundBaselineY = null; currentState = 'CALIBRATING'; startBtn.innerText = '比例尺校正中...';
+            takeoffMaxHipFlexion = 0; takeoffMaxKneeFlexion = 0; actionPhaseText.innerText = '校正站立狀態';
           }
         }, 1000);
       } else {
