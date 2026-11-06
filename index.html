@@ -1,0 +1,232 @@
+
+
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>垂直跳高度測量 (MediaPipe 滯空時間法)</title>
+  <!-- 引入 MediaPipe 所需庫 -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h2 { margin-top: 20px; }
+    .container {
+      position: relative;
+      width: 640px;
+      height: 480px;
+      margin-top: 10px;
+      border: 2px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      background-color: #000;
+    }
+    /* 隱藏原始影片，只顯示畫布 */
+    video { display: none; }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      transform: scaleX(-1); /* 鏡像翻轉，讓使用者體驗更直覺 */
+    }
+    .panel {
+      width: 640px;
+      background: #1e1e1e;
+      padding: 15px;
+      margin-top: 15px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-sizing: border-box;
+    }
+    .data-box {
+      text-align: center;
+    }
+    .data-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #00e676;
+    }
+    button {
+      background-color: #2979ff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    button:hover { background-color: #2264d1; }
+    .status {
+      font-weight: bold;
+      color: #ff9100;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>垂直跳高度即時測量系統</h2>
+  
+  <div class="container">
+    <video id="input_video" width="640" height="480" autoplay playsinline></video>
+    <canvas id="output_canvas" width="640" height="480"></canvas>
+  </div>
+
+  <div class="panel">
+    <div>
+      狀態: <span id="status_text" class="status">等待偵測...</span>
+    </div>
+    <div class="data-box">
+      滯空時間<br>
+      <span id="flight_time" class="data-value">0.000</span> 秒
+    </div>
+    <div class="data-box">
+      預估跳躍高度<br>
+      <span id="jump_height" class="data-value">0.0</span> cm
+    </div>
+    <button id="calibrate_btn">校正地面基準線</button>
+  </div>
+
+  <script>
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    
+    // UI 元素
+    const statusText = document.getElementById('status_text');
+    const flightTimeText = document.getElementById('flight_time');
+    const jumpHeightText = document.getElementById('jump_height');
+    const calibrateBtn = document.getElementById('calibrate_btn');
+
+    // 系統變數
+    let groundBaselineY = null;     // 站立時的腳踝 Y 軸基準線 (0~1)
+    let jumpThreshold = 0.03;       // 離地判定閾值 (數值越小，物理高度越高)
+    let currentState = 'CALIBRATING'; // 'CALIBRATING', 'GROUNDED', 'AIRBORNE'
+    
+    let takeoffTime = 0;
+    const GRAVITY = 9.81;
+
+    // 校正按鈕：重新抓取站立時的腳部位置
+    calibrateBtn.addEventListener('click', () => {
+      groundBaselineY = null;
+      currentState = 'CALIBRATING';
+      statusText.innerText = '請在畫面中站定...';
+      statusText.style.color = '#ff9100';
+    });
+
+    // 初始化 MediaPipe Pose
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
+    pose.setOptions({
+      modelComplexity: 1, // 取得效能與準確度的平衡
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    // 每偵測到一幀畫面時執行的核心邏輯
+    pose.onResults((results) => {
+      // 1. 繪製視訊與骨架
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+      
+      if (results.poseLandmarks) {
+        // 繪製骨架連線
+        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+        drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
+
+        // 取得左右腳踝 (27: 左腳踝, 28: 右腳踝) 的 Y 座標
+        // MediaPipe 中 Y 軸向下為正 (頂部=0，底部=1)
+        const leftAnkleY = results.poseLandmarks[27].y;
+        const rightAnkleY = results.poseLandmarks[28].y;
+        
+        // 取兩腳踝中最接近地面的點（Y值最大）作為當前足部最低點
+        const currentFootY = Math.max(leftAnkleY, rightAnkleY);
+
+        // 2. 狀態機與高度判定邏輯
+        if (currentState === 'CALIBRATING') {
+          // 簡單校正：抓取當前站立的座標做為基準線
+          // 實際應用中可改為連續 N 幀取平均以提升穩定度
+          groundBaselineY = currentFootY;
+          currentState = 'GROUNDED';
+          statusText.innerText = '準備完成，請起跳';
+          statusText.style.color = '#00e676';
+        } 
+        else if (currentState === 'GROUNDED' || currentState === 'AIRBORNE') {
+          
+          // 繪製基準線 (視覺化輔助)
+          if (groundBaselineY) {
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(0, groundBaselineY * canvasElement.height);
+            canvasCtx.lineTo(canvasElement.width, groundBaselineY * canvasElement.height);
+            canvasCtx.strokeStyle = 'yellow';
+            canvasCtx.lineWidth = 2;
+            canvasCtx.stroke();
+          }
+
+          // 判斷是否離地：Y值小於基準線減去閾值 (越往畫面頂端 Y 越小)
+          const isAirborne = currentFootY < (groundBaselineY - jumpThreshold);
+
+          if (currentState === 'GROUNDED' && isAirborne) {
+            // 觸發離地瞬間
+            currentState = 'AIRBORNE';
+            takeoffTime = performance.now();
+            statusText.innerText = '跳躍中...';
+            statusText.style.color = '#ff1744';
+          } 
+          else if (currentState === 'AIRBORNE' && !isAirborne) {
+            // 觸發著地瞬間
+            const landingTime = performance.now();
+            const flightTimeSec = (landingTime - takeoffTime) / 1000;
+            
+            // 排除過短的雜訊 (小於 0.15 秒可能是墊腳尖)
+            if (flightTimeSec > 0.15) {
+              // 公式：h = (1/8) * g * t^2 (公尺)，乘以 100 轉為公分
+              const heightCm = (1 / 8) * GRAVITY * Math.pow(flightTimeSec, 2) * 100;
+              
+              flightTimeText.innerText = flightTimeSec.toFixed(3);
+              jumpHeightText.innerText = heightCm.toFixed(1);
+            }
+            
+            currentState = 'GROUNDED';
+            statusText.innerText = '準備完成，請起跳';
+            statusText.style.color = '#00e676';
+          }
+        }
+      }
+      canvasCtx.restore();
+    });
+
+    // 啟動攝影機 (請求 60fps 如果設備支援)
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await pose.send({image: videoElement});
+      },
+      width: 640,
+      height: 480,
+      frameRate: { ideal: 60, max: 120 } 
+    });
+    camera.start();
+  </script>
+</body>
+</html>
