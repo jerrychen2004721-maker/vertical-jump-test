@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>垂直跳動作分析與測量系統</title>
+  <title>垂直跳動作分析與測量系統 (三關節追蹤版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -73,11 +73,13 @@
       margin-top: 10px;
       border-radius: 8px;
       display: flex;
-      justify-content: space-around;
+      flex-direction: column;
+      align-items: center;
       box-sizing: border-box;
-      font-size: 18px;
+      font-size: 16px;
+      gap: 5px;
     }
-    .phase-active { color: #ff9100; font-weight: bold; }
+    .phase-active { color: #ff9100; font-weight: bold; font-size: 18px; }
 
     .history-panel {
       flex-direction: column;
@@ -103,7 +105,7 @@
       font-size: 18px; margin-bottom: 5px;
     }
     .record-details {
-      font-size: 14px; color: #aaa;
+      font-size: 14px; color: #aaa; line-height: 1.5;
     }
     
     .data-box { text-align: center; }
@@ -141,8 +143,8 @@
   </div>
 
   <div class="phase-panel">
-    <div>當前關節角度: <span id="knee_angle" style="color:#00b0ff;">180°</span></div>
-    <div>動作階段: <span id="action_phase" class="phase-active">待機</span></div>
+    <div>即時角度 ➔ 髖: <span id="hip_angle" style="color:#00b0ff;">180°</span> | 膝: <span id="knee_angle" style="color:#00b0ff;">180°</span> | 踝: <span id="ankle_angle" style="color:#00b0ff;">90°</span></div>
+    <div>動作階段 ➔ <span id="action_phase" class="phase-active">待機</span></div>
   </div>
 
   <div class="panel">
@@ -166,7 +168,10 @@
     const startBtn = document.getElementById('start_btn');
     const countdownOverlay = document.getElementById('countdown_overlay');
     const historyList = document.getElementById('history_list');
+    
+    const hipAngleText = document.getElementById('hip_angle');
     const kneeAngleText = document.getElementById('knee_angle');
+    const ankleAngleText = document.getElementById('ankle_angle');
     const actionPhaseText = document.getElementById('action_phase');
 
     // 系統變數
@@ -177,11 +182,14 @@
     let jumpCount = 0;
     const GRAVITY = 9.81;
 
-    // 動作階段分析變數
+    // 動作階段與角度追蹤變數
     let jumpPhase = '站立'; // 站立 -> 制動 -> 推蹬 -> 滯空
-    let minKneeAngle = 180;
-    let brakingStartTime = 0;
-    let propulsionStartTime = 0;
+    let minKneeAngle = 180; // 仍然保留作為動作切分判斷用
+    
+    // 三關節最大角度 (用於紀錄發力伸展度)
+    let maxHipAngle = 0;
+    let maxKneeAngle = 0;
+    let maxAnkleAngle = 0;
 
     // 角度計算函式：依據三點座標算出夾角
     function calculateAngle(a, b, c) {
@@ -239,7 +247,13 @@
           currentState = 'CALIBRATING';
           startBtn.innerText = '偵測中...';
           jumpPhase = '站立';
+          
+          // 重置角度紀錄
           minKneeAngle = 180;
+          maxHipAngle = 0;
+          maxKneeAngle = 0;
+          maxAnkleAngle = 0;
+          
           actionPhaseText.innerText = '站立準備';
         }
       }, 1000);
@@ -265,16 +279,29 @@
         // 使用客製化繪圖函式 (不畫臉)
         drawBodyOnly(canvasCtx, results.poseLandmarks);
 
-        const leftAnkleY = results.poseLandmarks[27].y;
-        const rightAnkleY = results.poseLandmarks[28].y;
-        const currentFootY = Math.max(leftAnkleY, rightAnkleY);
+        const lms = results.poseLandmarks;
+        const currentFootY = Math.max(lms[27].y, lms[28].y);
 
-        // 計算左右腳膝蓋角度並取平均 (髖-膝-踝)
-        const leftAngle = calculateAngle(results.poseLandmarks[23], results.poseLandmarks[25], results.poseLandmarks[27]);
-        const rightAngle = calculateAngle(results.poseLandmarks[24], results.poseLandmarks[26], results.poseLandmarks[28]);
-        const avgKneeAngle = (leftAngle + rightAngle) / 2;
+        // --- 三關節角度計算 ---
+        // 1. 髖角 (肩11/12 - 髖23/24 - 膝25/26)
+        const leftHipAngle = calculateAngle(lms[11], lms[23], lms[25]);
+        const rightHipAngle = calculateAngle(lms[12], lms[24], lms[26]);
+        const avgHipAngle = (leftHipAngle + rightHipAngle) / 2;
+
+        // 2. 膝角 (髖23/24 - 膝25/26 - 踝27/28)
+        const leftKneeAngle = calculateAngle(lms[23], lms[25], lms[27]);
+        const rightKneeAngle = calculateAngle(lms[24], lms[26], lms[28]);
+        const avgKneeAngle = (leftKneeAngle + rightKneeAngle) / 2;
+
+        // 3. 踝角 (膝25/26 - 踝27/28 - 腳尖31/32)
+        const leftAnkleAngle = calculateAngle(lms[25], lms[27], lms[31]);
+        const rightAnkleAngle = calculateAngle(lms[26], lms[28], lms[32]);
+        const avgAnkleAngle = (leftAnkleAngle + rightAnkleAngle) / 2;
         
+        // 更新即時畫面數值
+        hipAngleText.innerText = avgHipAngle.toFixed(0) + '°';
         kneeAngleText.innerText = avgKneeAngle.toFixed(0) + '°';
+        ankleAngleText.innerText = avgAnkleAngle.toFixed(0) + '°';
 
         if (currentState === 'IDLE' || currentState === 'COUNTDOWN') {
           canvasCtx.restore();
@@ -299,20 +326,21 @@
 
           const isAirborne = currentFootY < (groundBaselineY - jumpThreshold);
 
-          // === 動作階段分析 (制動與推蹬) ===
+          // === 紀錄三關節最大伸展角度 ===
+          if (avgHipAngle > maxHipAngle) maxHipAngle = avgHipAngle;
+          if (avgKneeAngle > maxKneeAngle) maxKneeAngle = avgKneeAngle;
+          if (avgAnkleAngle > maxAnkleAngle) maxAnkleAngle = avgAnkleAngle;
+
+          // === 動作階段分析 (制動與推蹬，仍依賴膝角判斷最穩定) ===
           if (currentState === 'GROUNDED') {
-             // 紀錄最低屈膝角度
              if (avgKneeAngle < minKneeAngle) { minKneeAngle = avgKneeAngle; }
 
              if (jumpPhase === '站立' && avgKneeAngle < 165) {
                jumpPhase = '制動 (Braking)';
-               brakingStartTime = performance.now();
                actionPhaseText.innerText = jumpPhase;
              } 
              else if (jumpPhase === '制動 (Braking)' && avgKneeAngle > minKneeAngle + 5) {
-               // 當角度從最低點開始回升超過 5 度，視為開始往上發力推蹬
                jumpPhase = '推蹬 (Propulsion)';
-               propulsionStartTime = performance.now();
                actionPhaseText.innerText = jumpPhase;
              }
           }
@@ -334,8 +362,8 @@
               flightTimeText.innerText = flightTimeSec.toFixed(3);
               jumpHeightText.innerText = heightCm.toFixed(1);
               
-              // 生成 LINE 分享連結
-              const shareText = `【我的垂直跳測試數據】\n🚀 跳躍高度：${heightCm.toFixed(1)} cm\n⏱️ 滯空時間：${flightTimeSec.toFixed(3)} 秒\n🦵 最低屈膝角：${minKneeAngle.toFixed(0)} 度\n快來測測看你的爆發力！`;
+              // 生成 LINE 分享連結 (加入三關節最大伸展角度)
+              const shareText = `【我的垂直跳測試數據】\n🚀 跳躍高度：${heightCm.toFixed(1)} cm\n⏱️ 滯空時間：${flightTimeSec.toFixed(3)} 秒\n💥 三關節最大伸展 ➔ 髖:${maxHipAngle.toFixed(0)}°/膝:${maxKneeAngle.toFixed(0)}°/踝:${maxAnkleAngle.toFixed(0)}°\n快來測測看你的爆發力！`;
               const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(shareText)}`;
 
               jumpCount++;
@@ -346,7 +374,8 @@
                   <span>高度: <span class="history-value">${heightCm.toFixed(1)}</span> cm</span>
                 </div>
                 <div class="record-details">
-                  滯空時間: ${flightTimeSec.toFixed(3)}s | 制動最低角度: ${minKneeAngle.toFixed(0)}°
+                  滯空時間: ${flightTimeSec.toFixed(3)}s<br>
+                  最大伸展角: 髖 <span class="history-value">${maxHipAngle.toFixed(0)}°</span> | 膝 <span class="history-value">${maxKneeAngle.toFixed(0)}°</span> | 踝 <span class="history-value">${maxAnkleAngle.toFixed(0)}°</span>
                 </div>
                 <a href="${lineUrl}" target="_blank" class="btn-line">分享到 LINE</a>
               `;
