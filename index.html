@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>高階垂直跳分析 (雙軌驗證精準版)</title>
+  <title>高階垂直跳分析 (時間軸常駐版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
@@ -29,7 +29,7 @@
     .phase-active { color: #ff9100; font-weight: bold; font-size: 16px; }
 
     /* 時間軸控制面板 (常駐顯示) */
-    .timeline-panel { background: #1a1a1a; border: 1px solid #444; display: flex; }
+    .timeline-panel { background: #1a1a1a; border: 1px solid #444; display: flex; transition: opacity 0.3s ease; }
     .timeline-row { display: flex; align-items: center; width: 100%; gap: 10px; margin-bottom: 12px; }
     #video_slider { flex: 1; accent-color: #00b0ff; cursor: pointer; }
     #video_slider:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -92,7 +92,7 @@
 
   <!-- 常駐顯示的影片時間軸 -->
   <div class="timeline-panel" id="timeline_panel">
-    <div style="width:100%; font-size:14px; color:#ff9800; font-weight:bold; margin-bottom:8px;" id="timeline_title">⏱️ 影片時間軸 (請先匯入影片以啟用)</div>
+    <div style="width:100%; font-size:14px; color:#ff9800; font-weight:bold; margin-bottom:8px;" id="timeline_title">⏱️ 影片時間軸 (請先匯入影片以解鎖)</div>
     <div class="timeline-row">
       <button id="btn_play_toggle" disabled style="flex: 0 0 auto; min-width: 40px; padding: 8px; background:#444;">⏸️</button>
       <input type="range" id="video_slider" min="0" max="100" value="0" step="0.001" disabled>
@@ -172,6 +172,7 @@
     const historyList = document.getElementById('history_list');
 
     // 手動時間軸控制變數
+    const timelinePanel = document.getElementById('timeline_panel');
     const timelineTitle = document.getElementById('timeline_title');
     const videoSlider = document.getElementById('video_slider');
     const videoTimeDisplay = document.getElementById('video_time_display');
@@ -193,9 +194,7 @@
     let tempFlightTime = 0; let tempJumpHeight = 0; let tempContactTime = 0; let tempRSI = 0;         
     let takeoffMaxHipFlexion = 0; let takeoffMaxKneeFlexion = 0; let landingMaxHipFlexion = 0; let landingMaxKneeFlexion = 0;
     let sjCounterMovement = false; 
-    
-    // ⭐ 優化 1：調降起跳閾值，從 0.03 改為 0.015，讓 AI 更快捕捉到離地瞬間
-    let jumpThreshold = 0.015;
+    let jumpThreshold = 0.015; // 提高 AI 離地判定敏銳度
 
     let csvDataLog = [];
     let audioCtx;
@@ -215,6 +214,7 @@
     // 手動時間軸與播放控制邏輯
     // ==========================================
     function enableManualControls() {
+      timelinePanel.style.opacity = '1';
       videoSlider.disabled = false; btnPlayToggle.disabled = false;
       btnMarkTakeoff.disabled = false; btnMarkLanding.disabled = false;
       timelineTitle.innerText = '⏱️ 影片時間軸 (拖曳滑桿尋找精確影格)';
@@ -222,9 +222,10 @@
     }
     
     function disableManualControls() {
+      timelinePanel.style.opacity = '0.4'; // 即時鏡頭下變成半透明
       videoSlider.disabled = true; btnPlayToggle.disabled = true;
       btnMarkTakeoff.disabled = true; btnMarkLanding.disabled = true;
-      timelineTitle.innerText = '⏱️ 影片時間軸 (請先匯入影片以啟用)';
+      timelineTitle.innerText = '⏱️ 影片時間軸 (請先匯入影片以解鎖)';
       timelineTitle.style.color = '#ff9800';
     }
 
@@ -260,7 +261,7 @@
     function calcManualJump() {
       if (manualTakeoffTime !== null && manualLandingTime !== null) {
         let ft = Math.max(0, manualLandingTime - manualTakeoffTime);
-        let h = (1 / 8) * GRAVITY * Math.pow(ft, 2) * 100; // 公式 h = 1/8 * g * t^2
+        let h = (1 / 8) * GRAVITY * Math.pow(ft, 2) * 100; 
         manualResultDisplay.innerHTML = `手動精確結果 ➔ 滯空: <span style="color:#fff">${ft.toFixed(3)}s</span> | 高度: <span style="font-size:22px; color:#ff9800">${h.toFixed(1)} cm</span>`;
       }
     }
