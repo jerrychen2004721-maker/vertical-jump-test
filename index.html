@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>高階垂直跳分析 (雙軌驗證版)</title>
+  <title>高階垂直跳分析 (雙軌驗證精準版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
@@ -28,17 +28,19 @@
     .phase-panel { background: #2a2a2a; gap: 8px; font-size: 14px; flex-direction: row; justify-content: space-around; flex-wrap: wrap;}
     .phase-active { color: #ff9100; font-weight: bold; font-size: 16px; }
 
-    /* 時間軸控制面板專屬樣式 */
-    .timeline-panel { background: #222; border: 1px solid #444; display: none; }
+    /* 時間軸控制面板 (常駐顯示) */
+    .timeline-panel { background: #1a1a1a; border: 1px solid #444; display: flex; }
     .timeline-row { display: flex; align-items: center; width: 100%; gap: 10px; margin-bottom: 12px; }
-    #video_slider { flex: 1; accent-color: #00b0ff; }
+    #video_slider { flex: 1; accent-color: #00b0ff; cursor: pointer; }
+    #video_slider:disabled { opacity: 0.3; cursor: not-allowed; }
     .time-display { font-family: monospace; font-size: 14px; color: #ccc; min-width: 45px; text-align: right; }
     .btn-manual { flex: 1; padding: 8px; font-size: 13px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; color: white; transition: 0.2s;}
+    .btn-manual:disabled { background: #555 !important; color: #888; cursor: not-allowed; }
     #btn_mark_takeoff { background: #ff9800; }
-    #btn_mark_takeoff:hover { background: #e68a00; }
+    #btn_mark_takeoff:hover:not(:disabled) { background: #e68a00; }
     #btn_mark_landing { background: #03a9f4; }
-    #btn_mark_landing:hover { background: #0288d1; }
-    .manual-result { width: 100%; text-align: center; margin-top: 8px; font-size: 15px; color: #00e676; font-weight: bold; background: #111; padding: 6px; border-radius: 4px;}
+    #btn_mark_landing:hover:not(:disabled) { background: #0288d1; }
+    .manual-result { width: 100%; text-align: center; margin-top: 8px; font-size: 15px; color: #00e676; font-weight: bold; background: #111; padding: 8px; border-radius: 4px; border: 1px dashed #00e676;}
 
     .settings-row { width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #444; font-size: 14px; }
     .settings-group { display: flex; align-items: center; gap: 5px; }
@@ -88,19 +90,19 @@
     <div id="play_pause_overlay">⏸️</div>
   </div>
 
-  <!-- 新增：手動時間軸控制面板 -->
+  <!-- 常駐顯示的影片時間軸 -->
   <div class="timeline-panel" id="timeline_panel">
-    <div style="width:100%; font-size:14px; color:#ff9800; font-weight:bold; margin-bottom:8px;">⏱️ 影片時間軸 (手動分析工具)</div>
+    <div style="width:100%; font-size:14px; color:#ff9800; font-weight:bold; margin-bottom:8px;" id="timeline_title">⏱️ 影片時間軸 (請先匯入影片以啟用)</div>
     <div class="timeline-row">
-      <button id="btn_play_toggle" style="flex: 0 0 auto; min-width: 40px; padding: 8px; background:#444;">⏸️</button>
-      <input type="range" id="video_slider" min="0" max="100" value="0" step="0.01">
+      <button id="btn_play_toggle" disabled style="flex: 0 0 auto; min-width: 40px; padding: 8px; background:#444;">⏸️</button>
+      <input type="range" id="video_slider" min="0" max="100" value="0" step="0.001" disabled>
       <span class="time-display" id="video_time_display">0.00s</span>
     </div>
     <div class="timeline-row" style="gap:8px;">
-      <button id="btn_mark_takeoff" class="btn-manual">📍 標記離地 (--)</button>
-      <button id="btn_mark_landing" class="btn-manual">📍 標記觸地 (--)</button>
+      <button id="btn_mark_takeoff" class="btn-manual" disabled>📍 標記離地 (--)</button>
+      <button id="btn_mark_landing" class="btn-manual" disabled>📍 標記觸地 (--)</button>
     </div>
-    <div class="manual-result" id="manual_result">手動計算結果：請先標記離地與觸地</div>
+    <div class="manual-result" id="manual_result">手動驗證區：需匯入影片並標記</div>
   </div>
 
   <div class="phase-panel">
@@ -170,22 +172,17 @@
     const historyList = document.getElementById('history_list');
 
     // 手動時間軸控制變數
-    const timelinePanel = document.getElementById('timeline_panel');
+    const timelineTitle = document.getElementById('timeline_title');
     const videoSlider = document.getElementById('video_slider');
     const videoTimeDisplay = document.getElementById('video_time_display');
     const btnPlayToggle = document.getElementById('btn_play_toggle');
     const btnMarkTakeoff = document.getElementById('btn_mark_takeoff');
     const btnMarkLanding = document.getElementById('btn_mark_landing');
     const manualResultDisplay = document.getElementById('manual_result');
-    let manualTakeoffTime = null;
-    let manualLandingTime = null;
-    let isScrubbing = false;
+    let manualTakeoffTime = null; let manualLandingTime = null; let isScrubbing = false;
     
-    let isLiveMode = true; 
-    let currentFacingMode = 'environment'; 
-    let currentStream = null; 
+    let isLiveMode = true; let currentFacingMode = 'environment'; let currentStream = null; 
     let reqWidth = 1280; let reqHeight = 720;
-    
     let currentState = 'IDLE'; let jumpMode = 'CMJ'; let jumpCount = 0;
     const GRAVITY = 9.81;
 
@@ -195,11 +192,13 @@
 
     let tempFlightTime = 0; let tempJumpHeight = 0; let tempContactTime = 0; let tempRSI = 0;         
     let takeoffMaxHipFlexion = 0; let takeoffMaxKneeFlexion = 0; let landingMaxHipFlexion = 0; let landingMaxKneeFlexion = 0;
-    let sjCounterMovement = false; let jumpThreshold = 0.03;
+    let sjCounterMovement = false; 
+    
+    // ⭐ 優化 1：調降起跳閾值，從 0.03 改為 0.015，讓 AI 更快捕捉到離地瞬間
+    let jumpThreshold = 0.015;
 
     let csvDataLog = [];
     let audioCtx;
-
     function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); }
     function playBeep(freq, duration, type='sine') {
       if (!audioCtx) return;
@@ -215,6 +214,20 @@
     // ==========================================
     // 手動時間軸與播放控制邏輯
     // ==========================================
+    function enableManualControls() {
+      videoSlider.disabled = false; btnPlayToggle.disabled = false;
+      btnMarkTakeoff.disabled = false; btnMarkLanding.disabled = false;
+      timelineTitle.innerText = '⏱️ 影片時間軸 (拖曳滑桿尋找精確影格)';
+      timelineTitle.style.color = '#00e676';
+    }
+    
+    function disableManualControls() {
+      videoSlider.disabled = true; btnPlayToggle.disabled = true;
+      btnMarkTakeoff.disabled = true; btnMarkLanding.disabled = true;
+      timelineTitle.innerText = '⏱️ 影片時間軸 (請先匯入影片以啟用)';
+      timelineTitle.style.color = '#ff9800';
+    }
+
     function togglePlayPause() {
       if (isLiveMode) return;
       if (uploadVideo.paused) { uploadVideo.play(); btnPlayToggle.innerText = '⏸️'; playPauseOverlay.style.display = 'none'; } 
@@ -227,7 +240,7 @@
     uploadVideo.addEventListener('timeupdate', () => {
       if (!isScrubbing) {
         videoSlider.value = uploadVideo.currentTime;
-        videoTimeDisplay.innerText = uploadVideo.currentTime.toFixed(2) + 's';
+        videoTimeDisplay.innerText = uploadVideo.currentTime.toFixed(3) + 's';
       }
     });
 
@@ -237,8 +250,7 @@
     videoSlider.addEventListener('input', (e) => {
       uploadVideo.pause(); btnPlayToggle.innerText = '▶️';
       uploadVideo.currentTime = parseFloat(e.target.value);
-      videoTimeDisplay.innerText = uploadVideo.currentTime.toFixed(2) + 's';
-      // 手動拖曳時，立刻將影片影格畫到 Canvas 上方便對準
+      videoTimeDisplay.innerText = uploadVideo.currentTime.toFixed(3) + 's';
       canvasCtx.drawImage(uploadVideo, 0, 0, canvasElement.width, canvasElement.height);
     });
 
@@ -248,27 +260,27 @@
     function calcManualJump() {
       if (manualTakeoffTime !== null && manualLandingTime !== null) {
         let ft = Math.max(0, manualLandingTime - manualTakeoffTime);
-        let h = (1 / 8) * GRAVITY * Math.pow(ft, 2) * 100;
-        manualResultDisplay.innerHTML = `手動計算 ➔ 滯空: <span style="color:#fff">${ft.toFixed(3)}s</span> | 高度: <span style="font-size:20px; color:#ff9800">${h.toFixed(1)} cm</span>`;
+        let h = (1 / 8) * GRAVITY * Math.pow(ft, 2) * 100; // 公式 h = 1/8 * g * t^2
+        manualResultDisplay.innerHTML = `手動精確結果 ➔ 滯空: <span style="color:#fff">${ft.toFixed(3)}s</span> | 高度: <span style="font-size:22px; color:#ff9800">${h.toFixed(1)} cm</span>`;
       }
     }
 
     btnMarkTakeoff.addEventListener('click', () => {
       manualTakeoffTime = uploadVideo.currentTime;
-      btnMarkTakeoff.innerText = `📍 離地 (${manualTakeoffTime.toFixed(2)}s)`;
+      btnMarkTakeoff.innerText = `📍 離地 (${manualTakeoffTime.toFixed(3)}s)`;
       calcManualJump();
     });
 
     btnMarkLanding.addEventListener('click', () => {
       manualLandingTime = uploadVideo.currentTime;
-      btnMarkLanding.innerText = `📍 觸地 (${manualLandingTime.toFixed(2)}s)`;
+      btnMarkLanding.innerText = `📍 觸地 (${manualLandingTime.toFixed(3)}s)`;
       calcManualJump();
     });
 
     function resetManualData() {
       manualTakeoffTime = null; manualLandingTime = null;
       btnMarkTakeoff.innerText = '📍 標記離地 (--)'; btnMarkLanding.innerText = '📍 標記觸地 (--)';
-      manualResultDisplay.innerHTML = '手動計算結果：請先標記離地與觸地';
+      manualResultDisplay.innerHTML = '手動驗證區：拖拉上方滑桿並標記起降點';
     }
     // ==========================================
 
@@ -286,7 +298,7 @@
         if (currentState !== 'IDLE') return;
         document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active'); jumpMode = tab.dataset.mode;
-        startBtn.innerText = `啟動 AI ${jumpMode} 測量`;
+        startBtn.innerText = isLiveMode ? `啟動 AI ${jumpMode} 測量` : `啟動影片 AI 自動分析`;
         if(jumpMode === 'DJ') { document.getElementById('label_1').innerText = '觸地時間(GCT)'; document.getElementById('box_3').style.display = 'block'; } 
         else { document.getElementById('label_1').innerText = 'AI 滯空時間'; document.getElementById('box_3').style.display = 'none'; }
         document.getElementById('val_1').innerText = '0.000 s'; document.getElementById('val_2').innerText = '0.0 cm'; document.getElementById('val_3').innerText = '0.00';
@@ -320,12 +332,12 @@
       }
 
       if (jumpMode === 'CMJ') {
-        detailHTML = `滯空: ${tempFlightTime.toFixed(3)}s | 重心估算: ${trueHipHeightCm.toFixed(1)}cm<br>推蹬最大屈曲 ➔ 髖: <span class="history-value">${takeoffMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${takeoffMaxKneeFlexion.toFixed(0)}°</span><br>落地緩衝屈曲 ➔ 髖: <span class="history-value">${landingMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${landingMaxKneeFlexion.toFixed(0)}°</span>`;
+        detailHTML = `AI 滯空: ${tempFlightTime.toFixed(3)}s | 重心估算: ${trueHipHeightCm.toFixed(1)}cm<br>推蹬最大屈曲 ➔ 髖: <span class="history-value">${takeoffMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${takeoffMaxKneeFlexion.toFixed(0)}°</span><br>落地緩衝屈曲 ➔ 髖: <span class="history-value">${landingMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${landingMaxKneeFlexion.toFixed(0)}°</span>`;
       } else if (jumpMode === 'SJ') {
         if (sjCounterMovement) { warningTag += `<span class="cheat-warning">⚠️ 下蹲借力作弊</span>`; cheatMsg = "下蹲借力"; }
-        detailHTML = `滯空: ${tempFlightTime.toFixed(3)}s<br>起跳前初始屈曲 ➔ 髖: <span class="history-value">${takeoffMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${takeoffMaxKneeFlexion.toFixed(0)}°</span><br>落地緩衝屈曲 ➔ 髖: <span class="history-value">${landingMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${landingMaxKneeFlexion.toFixed(0)}°</span>`;
+        detailHTML = `AI 滯空: ${tempFlightTime.toFixed(3)}s<br>起跳前初始屈曲 ➔ 髖: <span class="history-value">${takeoffMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${takeoffMaxKneeFlexion.toFixed(0)}°</span><br>落地緩衝屈曲 ➔ 髖: <span class="history-value">${landingMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${landingMaxKneeFlexion.toFixed(0)}°</span>`;
       } else if (jumpMode === 'DJ') {
-        detailHTML = `觸地(GCT): ${tempContactTime.toFixed(3)}s | 滯空: ${tempFlightTime.toFixed(3)}s<br>觸地最深屈曲 ➔ 髖: <span class="history-value">${takeoffMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${takeoffMaxKneeFlexion.toFixed(0)}°</span><br>落地緩衝屈曲 ➔ 髖: <span class="history-value">${landingMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${landingMaxKneeFlexion.toFixed(0)}°</span>`;
+        detailHTML = `觸地(GCT): ${tempContactTime.toFixed(3)}s | AI 滯空: ${tempFlightTime.toFixed(3)}s<br>觸地最深屈曲 ➔ 髖: <span class="history-value">${takeoffMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${takeoffMaxKneeFlexion.toFixed(0)}°</span><br>落地緩衝屈曲 ➔ 髖: <span class="history-value">${landingMaxHipFlexion.toFixed(0)}°</span> | 膝: <span class="history-value">${landingMaxKneeFlexion.toFixed(0)}°</span>`;
       }
 
       csvDataLog.push({
@@ -342,7 +354,7 @@
 
     exportBtn.addEventListener('click', () => {
       if (csvDataLog.length === 0) { alert('目前沒有測試數據可以匯出。'); return; }
-      let csvContent = "\uFEFF跳躍次數,測試模式,預估高度(cm),滯空時間(s),觸地時間(s),RSI指數,髖部爬升(cm),推蹬/觸地最深髖屈曲,推蹬/觸地最深膝屈曲,落地最大髖屈曲,落地最大膝屈曲,作弊判定\n";
+      let csvContent = "\uFEFF跳躍次數,測試模式,AI預估高度(cm),AI滯空時間(s),觸地時間(s),RSI指數,髖部爬升(cm),推蹬/觸地最深髖屈曲,推蹬/觸地最深膝屈曲,落地最大髖屈曲,落地最大膝屈曲,作弊判定\n";
       csvDataLog.forEach(row => { csvContent += `${row.JumpNo},${row.Mode},${row.JumpHeight_cm},${row.FlightTime_s},${row.ContactTime_s},${row.RSI},${row.TrueHipHeight_cm},${row.TakeoffHipAngle},${row.TakeoffKneeAngle},${row.LandingHipAngle},${row.LandingKneeAngle},${row.CheatFlag}\n`; });
       const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })));
       link.setAttribute("download", `垂直跳數據_${new Date().toISOString().slice(0,10)}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
@@ -417,10 +429,10 @@
       canvasCtx.restore();
     });
 
-    function resetButtons() { startBtn.innerText = isLiveMode ? `啟動 AI ${jumpMode} 測量` : '重啟 AI 影片分析'; startBtn.disabled = false; startBtn.classList.add('btn-ready'); }
+    function resetButtons() { startBtn.innerText = isLiveMode ? `啟動 AI ${jumpMode} 測量` : '重啟影片 AI 分析'; startBtn.disabled = false; startBtn.classList.add('btn-ready'); }
 
     async function startWebcam() {
-      isLiveMode = true; camBtn.style.display = 'none'; flipCamBtn.style.display = 'block'; resolutionSelect.disabled = false; timelinePanel.style.display = 'none'; videoContainer.style.cursor = 'default';
+      isLiveMode = true; camBtn.style.display = 'none'; flipCamBtn.style.display = 'block'; resolutionSelect.disabled = false; disableManualControls(); videoContainer.style.cursor = 'default';
       canvasElement.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)';
       actionPhaseText.innerText = `相機請求中...`; startBtn.disabled = true;
       if (currentStream) { currentStream.getTracks().forEach(track => track.stop()); webcamVideo.srcObject = null; }
@@ -442,7 +454,7 @@
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0]; if (!file) return;
       isLiveMode = false; if (currentStream) { currentStream.getTracks().forEach(track => track.stop()); webcamVideo.srcObject = null; }
-      canvasElement.style.transform = 'scaleX(1)'; camBtn.style.display = 'block'; flipCamBtn.style.display = 'none'; resolutionSelect.disabled = true; timelinePanel.style.display = 'flex'; videoContainer.style.cursor = 'pointer'; resetManualData();
+      canvasElement.style.transform = 'scaleX(1)'; camBtn.style.display = 'block'; flipCamBtn.style.display = 'none'; resolutionSelect.disabled = true; videoContainer.style.cursor = 'pointer'; resetManualData();
       
       actionPhaseText.innerText = '處理影片中...'; startBtn.disabled = true; uploadVideo.src = URL.createObjectURL(file); uploadVideo.load();
     });
@@ -451,7 +463,7 @@
       canvasElement.width = uploadVideo.videoWidth; canvasElement.height = uploadVideo.videoHeight; videoContainer.style.aspectRatio = `${uploadVideo.videoWidth} / ${uploadVideo.videoHeight}`;
       videoSlider.max = uploadVideo.duration;
       uploadVideo.currentTime = 0;
-      setTimeout(async () => { try { await pose.send({image: uploadVideo}); currentState = 'IDLE'; actionPhaseText.innerText = `影片已就緒，可手動拉動時間軸或啟動AI`; resetButtons(); } catch(err) {} }, 500); 
+      setTimeout(async () => { try { await pose.send({image: uploadVideo}); currentState = 'IDLE'; actionPhaseText.innerText = `影片已就緒，可手動拉動時間軸或啟動AI`; resetButtons(); enableManualControls(); } catch(err) {} }, 500); 
     });
 
     function processUploadFrame() { if (isLiveMode || uploadVideo.paused || uploadVideo.ended) return; pose.send({image: uploadVideo}).then(() => requestAnimationFrame(processUploadFrame)).catch(() => requestAnimationFrame(processUploadFrame)); }
