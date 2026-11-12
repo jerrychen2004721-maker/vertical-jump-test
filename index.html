@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>高階垂直跳分析 (時間軸常駐版)</title>
+  <title>高階垂直跳分析 (視窗比例修復版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
@@ -90,7 +90,6 @@
     <div id="play_pause_overlay">⏸️</div>
   </div>
 
-  <!-- 常駐顯示的影片時間軸 -->
   <div class="timeline-panel" id="timeline_panel">
     <div style="width:100%; font-size:14px; color:#ff9800; font-weight:bold; margin-bottom:8px;" id="timeline_title">⏱️ 影片時間軸 (請先匯入影片以解鎖)</div>
     <div class="timeline-row">
@@ -171,7 +170,6 @@
     const actionPhaseText = document.getElementById('action_phase');
     const historyList = document.getElementById('history_list');
 
-    // 手動時間軸控制變數
     const timelinePanel = document.getElementById('timeline_panel');
     const timelineTitle = document.getElementById('timeline_title');
     const videoSlider = document.getElementById('video_slider');
@@ -194,7 +192,7 @@
     let tempFlightTime = 0; let tempJumpHeight = 0; let tempContactTime = 0; let tempRSI = 0;         
     let takeoffMaxHipFlexion = 0; let takeoffMaxKneeFlexion = 0; let landingMaxHipFlexion = 0; let landingMaxKneeFlexion = 0;
     let sjCounterMovement = false; 
-    let jumpThreshold = 0.015; // 提高 AI 離地判定敏銳度
+    let jumpThreshold = 0.015; 
 
     let csvDataLog = [];
     let audioCtx;
@@ -210,9 +208,6 @@
     const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
     pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 
-    // ==========================================
-    // 手動時間軸與播放控制邏輯
-    // ==========================================
     function enableManualControls() {
       timelinePanel.style.opacity = '1';
       videoSlider.disabled = false; btnPlayToggle.disabled = false;
@@ -222,7 +217,7 @@
     }
     
     function disableManualControls() {
-      timelinePanel.style.opacity = '0.4'; // 即時鏡頭下變成半透明
+      timelinePanel.style.opacity = '0.4'; 
       videoSlider.disabled = true; btnPlayToggle.disabled = true;
       btnMarkTakeoff.disabled = true; btnMarkLanding.disabled = true;
       timelineTitle.innerText = '⏱️ 影片時間軸 (請先匯入影片以解鎖)';
@@ -283,14 +278,12 @@
       btnMarkTakeoff.innerText = '📍 標記離地 (--)'; btnMarkLanding.innerText = '📍 標記觸地 (--)';
       manualResultDisplay.innerHTML = '手動驗證區：拖拉上方滑桿並標記起降點';
     }
-    // ==========================================
 
     resolutionSelect.addEventListener('change', (e) => {
       const val = parseInt(e.target.value);
-      if (val === 480) { reqWidth = 640; reqHeight = 480; videoContainer.style.aspectRatio = "4/3"; }
-      else if (val === 720) { reqWidth = 1280; reqHeight = 720; videoContainer.style.aspectRatio = "16/9"; }
-      else if (val === 1080) { reqWidth = 1920; reqHeight = 1080; videoContainer.style.aspectRatio = "16/9"; }
-      canvasElement.width = reqWidth; canvasElement.height = reqHeight;
+      if (val === 480) { reqWidth = 640; reqHeight = 480; }
+      else if (val === 720) { reqWidth = 1280; reqHeight = 720; }
+      else if (val === 1080) { reqWidth = 1920; reqHeight = 1080; }
       if (isLiveMode) startWebcam();
     });
 
@@ -432,8 +425,15 @@
 
     function resetButtons() { startBtn.innerText = isLiveMode ? `啟動 AI ${jumpMode} 測量` : '重啟影片 AI 分析'; startBtn.disabled = false; startBtn.classList.add('btn-ready'); }
 
+    // === 重點修改區：強制恢復畫布與容器的比例 ===
     async function startWebcam() {
       isLiveMode = true; camBtn.style.display = 'none'; flipCamBtn.style.display = 'block'; resolutionSelect.disabled = false; disableManualControls(); videoContainer.style.cursor = 'default';
+      
+      // 強制將畫布大小與容器比例，切換回設定選單中選擇的比例（如 16:9 或 4:3）
+      canvasElement.width = reqWidth;
+      canvasElement.height = reqHeight;
+      videoContainer.style.aspectRatio = `${reqWidth} / ${reqHeight}`;
+      
       canvasElement.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)';
       actionPhaseText.innerText = `相機請求中...`; startBtn.disabled = true;
       if (currentStream) { currentStream.getTracks().forEach(track => track.stop()); webcamVideo.srcObject = null; }
