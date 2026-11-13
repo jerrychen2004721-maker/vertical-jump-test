@@ -11,7 +11,7 @@
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f4f4f9; margin: 0; padding: 20px; }
         
-        .visual-section { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; width: 100%; max-width: 1350px; margin: 0 auto 20px auto; }
+        .visual-section { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; width: 100%; max-width: 1350px; margin: 0 auto 15px auto; }
         .canvas-wrapper { position: relative; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; flex-direction: column; align-items: center; }
         .canvas-label { font-weight: bold; margin-bottom: 10px; color: #333; }
         video { display: none; } 
@@ -25,7 +25,7 @@
         .calibration { margin-top: 15px; font-size: 1.1em; }
         .calibration input { font-size: 1em; width: 70px; text-align: center; margin-left: 10px; }
 
-        /* 新增：時間軸控制列 */
+        /* 時間軸控制列 */
         .timeline-container { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 0 auto 20px auto; width: 100%; max-width: 1310px; display: none; align-items: center; gap: 15px; }
         #playPauseBtn { background-color: #f39c12; color: white; border: none; padding: 10px 20px; border-radius: 5px; font-size: 1em; cursor: pointer; }
         #playPauseBtn:hover { background-color: #d68910; }
@@ -68,16 +68,8 @@
             <label>設定跑者真實身高 (校正比例尺用): <input type="number" id="userHeight" value="170"> cm</label>
         </div>
     </div>
-
-    <!-- 新增：時間軸與影片控制區塊 -->
-    <div class="timeline-container" id="timelineSection">
-        <button id="playPauseBtn">暫停</button>
-        <input type="range" id="videoSlider" min="0" value="0" step="0.01">
-        <div class="time-display">
-            <span id="currentTimeDisplay">0.00</span> / <span id="durationDisplay">0.00</span>
-        </div>
-    </div>
     
+    <!-- 影像與骨架區塊 -->
     <div class="visual-section">
         <div class="canvas-wrapper">
             <div class="canvas-label">原始影像 + 全身骨架</div>
@@ -91,6 +83,16 @@
         </div>
     </div>
 
+    <!-- 將時間軸與影片控制區塊移至影像正下方 -->
+    <div class="timeline-container" id="timelineSection">
+        <button id="playPauseBtn">暫停</button>
+        <input type="range" id="videoSlider" min="0" value="0" step="0.01">
+        <div class="time-display">
+            <span id="currentTimeDisplay">0.00</span> / <span id="durationDisplay">0.00</span>
+        </div>
+    </div>
+
+    <!-- 圖表區塊 -->
     <div class="charts-container">
         <div class="chart-box"><canvas id="trajChart"></canvas></div>
         <div class="chart-box"><canvas id="comChart"></canvas></div>
@@ -98,6 +100,7 @@
         <div class="chart-box"><canvas id="strideChart"></canvas></div>
     </div>
 
+    <!-- 儀表板與數據表 -->
     <div id="dashboard">
         <div class="card gct-card"><div class="title">觸地時間 GCT</div><div class="value"><span id="gct_display">0</span><span class="unit"> ms</span></div></div>
         <div class="card"><div class="title">單步垂直振幅</div><div class="value"><span id="vertical_oscillation">0.0</span><span class="unit"> cm</span></div></div>
@@ -142,7 +145,7 @@
         const durationDisplay = document.getElementById('durationDisplay');
         
         let cameraActive = false; let animationFrameId;
-        let isDraggingTimeline = false; // 是否正在拖曳時間軸
+        let isDraggingTimeline = false; 
         
         let prevAnkleDist = 0; let isIncreasing = false; let lastStepTime = 0; let firstStepTime = 0; 
         let stepCount = 0; let strideHistory = []; let currentStepMaxY = -Infinity; let currentStepMinY = Infinity;
@@ -279,11 +282,9 @@
                         trajPointR = { x: (rightAnkle.x - midHipX) * runningDirection * cmPerUnit, y: (dynamicGroundY - rightAnkle.y) * cmPerUnit };
                     }
 
-                    // 如果是在拖曳時間軸跳轉，重置步態追蹤避免干擾
                     if (isDraggingTimeline) {
                         prevAnkleDist = 0; isIncreasing = false;
                     } else {
-                        // 正常播放下的 GCT 與 步數計算
                         const currentLeftGrounded = leftAnkle.y > (dynamicGroundY - groundTolerance);
                         if (currentLeftGrounded && !isLeftGrounded) { leftContactStartTime = currentTime; } 
                         else if (!currentLeftGrounded && isLeftGrounded) {
@@ -371,7 +372,6 @@
                     }
                 }
 
-                // 圖表更新 (僅在正常播放時持續滾動)
                 if (!isDraggingTimeline && currentRightKneeAngle !== null && currentStrideCm !== null && comYCm !== null && trajPointL !== null && trajPointR !== null) {
                     const timeLabel = currentTime.toFixed(2);
                     comChart.data.labels.push(timeLabel); comChart.data.datasets[0].data.push(comYCm);
@@ -391,12 +391,11 @@
             skelCtx.restore();
         });
 
-        // ================= 攝影機與檔案控制 =================
         const camera = new Camera(videoElement, { onFrame: async () => { if(cameraActive) await pose.send({image: videoElement}); }, width: 640, height: 480 });
         
         startBtn.addEventListener('click', () => {
             if (!videoElement.paused) videoElement.pause(); cancelAnimationFrame(animationFrameId);
-            timelineSection.style.display = 'none'; // 攝影機模式隱藏時間軸
+            timelineSection.style.display = 'none'; 
             if (!cameraActive) { resetData(); camera.start(); startBtn.innerText = "關閉攝影機"; cameraActive = true; } 
             else { camera.stop(); videoElement.srcObject = null; startBtn.innerText = "啟動攝影機"; cameraActive = false; canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height); skelCtx.clearRect(0, 0, skelCanvasElement.width, skelCanvasElement.height); }
         });
@@ -407,7 +406,7 @@
             const file = event.target.files[0]; if (!file) return;
             if (cameraActive) { camera.stop(); startBtn.innerText = "啟動攝影機"; cameraActive = false; }
             resetData(); 
-            timelineSection.style.display = 'flex'; // 顯示時間軸
+            timelineSection.style.display = 'flex'; 
             playPauseBtn.innerText = "暫停";
             videoElement.srcObject = null; videoElement.src = URL.createObjectURL(file); videoElement.load();
         });
@@ -419,11 +418,9 @@
             }
         }
 
-        // ================= 時間軸邏輯 =================
         videoElement.addEventListener('loadedmetadata', () => {
             videoSlider.max = videoElement.duration;
             durationDisplay.innerText = videoElement.duration.toFixed(2);
-            // 同步調整兩個畫布的比例
             const ratio = videoElement.videoWidth / videoElement.videoHeight;
             canvasElement.width = 640; canvasElement.height = 640 / ratio; 
             skelCanvasElement.width = 640; skelCanvasElement.height = 640 / ratio; 
@@ -439,7 +436,6 @@
             }
         });
 
-        // 拖曳時間軸時暫停影片，並標記拖曳狀態
         videoSlider.addEventListener('input', () => {
             isDraggingTimeline = true;
             videoElement.pause();
@@ -447,13 +443,10 @@
             currentTimeDisplay.innerText = parseFloat(videoSlider.value).toFixed(2);
         });
 
-        // 拖曳放開後，跳轉時間並觸發單格運算
         videoSlider.addEventListener('change', () => {
             videoElement.currentTime = videoSlider.value;
-            // 由於跳轉時間是非同步的，我們等待 seeked 事件觸發後再送入模型
         });
 
-        // 當影片完成時間跳轉後，送入單格畫面進行分析
         videoElement.addEventListener('seeked', async () => {
             if (isDraggingTimeline) {
                 await pose.send({image: videoElement});
