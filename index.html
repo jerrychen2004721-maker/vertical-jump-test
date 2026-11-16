@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>高階垂直跳分析 (逐格微調精準版)</title>
+  <title>高階垂直跳分析 (時間軸視覺強化版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
@@ -28,15 +28,46 @@
     .phase-panel { background: #2a2a2a; gap: 8px; font-size: 14px; flex-direction: row; justify-content: space-around; flex-wrap: wrap;}
     .phase-active { color: #ff9100; font-weight: bold; font-size: 16px; }
 
-    /* 時間軸與微調控制面板 */
+    /* 時間軸與精簡微調控制面板 */
     .timeline-panel { background: #1a1a1a; border: 1px solid #444; display: flex; transition: opacity 0.3s ease; }
-    .timeline-row { display: flex; align-items: center; width: 100%; gap: 6px; margin-bottom: 10px; }
-    #video_slider { flex: 1; accent-color: #00b0ff; cursor: pointer; min-width: 80px; }
-    #video_slider:disabled { opacity: 0.3; cursor: not-allowed; }
-    .time-display { font-family: monospace; font-size: 13px; color: #00e676; min-width: 52px; text-align: right; font-weight: bold; }
+    .timeline-row { display: flex; align-items: center; width: 100%; gap: 4px; margin-bottom: 10px; }
     
-    /* 逐格微調與播放按鈕 */
-    .btn-step { flex: 0 0 auto; min-width: auto; padding: 8px 10px; font-size: 13px; background-color: #37474f; color: #fff; border-radius: 4px; border: 1px solid #546e7a; }
+    /* 強化時間軸視覺與滑桿粗細 */
+    #video_slider { 
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1; 
+      height: 8px; 
+      background: #444; 
+      border-radius: 4px; 
+      outline: none;
+      cursor: pointer; 
+      margin: 0 4px;
+    }
+    #video_slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #00b0ff;
+      border: 2px solid #ffffff;
+      cursor: pointer;
+    }
+    #video_slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #00b0ff;
+      border: 2px solid #ffffff;
+      cursor: pointer;
+    }
+    #video_slider:disabled { opacity: 0.3; cursor: not-allowed; }
+    
+    .time-display { font-family: monospace; font-size: 13px; color: #00e676; min-width: 50px; text-align: right; font-weight: bold; }
+    
+    /* 極致精簡的微調與播放按鈕 */
+    .btn-step { flex: 0 0 auto; min-width: 28px; padding: 6px 6px; font-size: 13px; background-color: #37474f; color: #fff; border-radius: 4px; border: 1px solid #546e7a; line-height: 1; }
     .btn-step:hover:not(:disabled) { background-color: #455a64; }
     .btn-step:active:not(:disabled) { background-color: #00b0ff; color: #000; }
 
@@ -99,14 +130,14 @@
     <div id="play_pause_overlay">⏸️</div>
   </div>
 
-  <!-- 時間軸與逐格微調控制面板 -->
+  <!-- 視覺強化版時間軸與精簡微調按鈕 -->
   <div class="timeline-panel" id="timeline_panel">
     <div style="width:100%; font-size:14px; color:#ff9800; font-weight:bold; margin-bottom:8px;" id="timeline_title">⏱️ 影片時間軸 (請先匯入影片以解鎖)</div>
     <div class="timeline-row">
       <button id="btn_play_toggle" class="btn-step" disabled>⏸️</button>
-      <button id="btn_prev_frame" class="btn-step" disabled title="上一格 (-0.03s)">⏮ -0.03s</button>
+      <button id="btn_prev_frame" class="btn-step" disabled title="上一格 (-0.03s)">-</button>
       <input type="range" id="video_slider" min="0" max="100" value="0" step="0.001" disabled>
-      <button id="btn_next_frame" class="btn-step" disabled title="下一格 (+0.03s)">+0.03s ⏭</button>
+      <button id="btn_next_frame" class="btn-step" disabled title="下一格 (+0.03s)">+</button>
       <span class="time-display" id="video_time_display">0.000s</span>
     </div>
     <div class="timeline-row" style="gap:8px;">
@@ -186,7 +217,6 @@
     const shareTextBtn = document.getElementById('share_text_btn');
     const exportBtn = document.getElementById('export_btn');
 
-    // 時間軸與微調按鈕變數
     const timelinePanel = document.getElementById('timeline_panel');
     const timelineTitle = document.getElementById('timeline_title');
     const videoSlider = document.getElementById('video_slider');
@@ -198,7 +228,7 @@
     const btnMarkLanding = document.getElementById('btn_mark_landing');
     const manualResultDisplay = document.getElementById('manual_result');
     let manualTakeoffTime = null; let manualLandingTime = null; let isScrubbing = false;
-    const FRAME_STEP = 1 / 30; // 約 0.0333 秒 (30fps 單格時間)
+    const FRAME_STEP = 1 / 30;
     
     let isLiveMode = true; let currentFacingMode = 'environment'; let currentStream = null; 
     let reqWidth = 1280; let reqHeight = 720;
@@ -228,13 +258,21 @@
     const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
     pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 
+    function updateSliderProgress() {
+      const max = parseFloat(videoSlider.max) || 100;
+      const val = parseFloat(videoSlider.value) || 0;
+      const pct = max > 0 ? (val / max) * 100 : 0;
+      videoSlider.style.background = `linear-gradient(to right, #00b0ff ${pct}%, #444 ${pct}%)`;
+    }
+
     function enableManualControls() {
       timelinePanel.style.opacity = '1';
       videoSlider.disabled = false; btnPlayToggle.disabled = false;
       btnPrevFrame.disabled = false; btnNextFrame.disabled = false;
       btnMarkTakeoff.disabled = false; btnMarkLanding.disabled = false;
-      timelineTitle.innerText = '⏱️ 影片時間軸 (支援滑桿拖曳與逐格微調)';
+      timelineTitle.innerText = '⏱️ 影片時間軸 (支援滑桿拖曳與 +/- 逐格微調)';
       timelineTitle.style.color = '#00e676';
+      updateSliderProgress();
     }
     
     function disableManualControls() {
@@ -244,6 +282,7 @@
       btnMarkTakeoff.disabled = true; btnMarkLanding.disabled = true;
       timelineTitle.innerText = '⏱️ 影片時間軸 (請先匯入影片以解鎖)';
       timelineTitle.style.color = '#ff9800';
+      videoSlider.style.background = '#444';
     }
 
     function togglePlayPause() {
@@ -255,7 +294,6 @@
     videoContainer.addEventListener('click', togglePlayPause);
     btnPlayToggle.addEventListener('click', togglePlayPause);
 
-    // 逐格微調核心函數
     function stepVideoFrame(deltaSeconds) {
       if (isLiveMode) return;
       uploadVideo.pause();
@@ -264,9 +302,9 @@
       uploadVideo.currentTime = targetTime;
       videoSlider.value = targetTime;
       videoTimeDisplay.innerText = targetTime.toFixed(3) + 's';
+      updateSliderProgress();
     }
 
-    // 確保影片跳轉（seek）完成後立刻重繪畫面並執行 MediaPipe 骨架偵測
     uploadVideo.addEventListener('seeked', () => {
       if (!isLiveMode) {
         canvasCtx.drawImage(uploadVideo, 0, 0, canvasElement.width, canvasElement.height);
@@ -281,6 +319,7 @@
       if (!isScrubbing) {
         videoSlider.value = uploadVideo.currentTime;
         videoTimeDisplay.innerText = uploadVideo.currentTime.toFixed(3) + 's';
+        updateSliderProgress();
       }
     });
 
@@ -291,6 +330,7 @@
       uploadVideo.pause(); btnPlayToggle.innerText = '▶️';
       uploadVideo.currentTime = parseFloat(e.target.value);
       videoTimeDisplay.innerText = uploadVideo.currentTime.toFixed(3) + 's';
+      updateSliderProgress();
       canvasCtx.drawImage(uploadVideo, 0, 0, canvasElement.width, canvasElement.height);
     });
 
